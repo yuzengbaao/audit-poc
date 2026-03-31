@@ -1,0 +1,65 @@
+name: Audit PoC Verification
+on:
+  push:
+    paths:
+      - 'poc-tests/**'
+      - '.github/workflows/audit-test.yml'
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chronicle-scribe
+            repo: https://github.com/chronicleprotocol/scribe.git
+            test_dir: test
+            test_pattern: "test/POC_*.t.sol"
+          - project: morpho-blue
+            repo: https://github.com/morpho-org/morpho-blue.git
+            test_dir: test
+            test_pattern: "test/POC_*.t.sol"
+          - project: moonwell
+            repo: https://github.com/moonwell-fi/moonwell-contracts-v2.git
+            test_dir: test/unit
+            test_pattern: "test/unit/POC_*.t.sol"
+          - project: sablier-v2
+            repo: https://github.com/sablier-labs/v2-core.git
+            test_dir: lockup/tests/verification
+            test_pattern: "lockup/tests/verification/POC_*.t.sol"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Clone ${{ matrix.project }}
+        run: git clone --depth 1 ${{ matrix.repo }} /tmp/${{ matrix.project }}
+
+      - name: Copy PoC Tests
+        run: |
+          mkdir -p /tmp/${{ matrix.project }}/${{ matrix.test_dir }}
+          cp poc-tests/${{ matrix.project }}/*.t.sol /tmp/${{ matrix.project }}/${{ matrix.test_dir }}/
+
+      - name: Install Dependencies
+        run: cd /tmp/${{ matrix.project }} && forge install --no-commit
+
+      - name: Build
+        run: cd /tmp/${{ matrix.project }} && forge build
+        continue-on-error: true
+
+      - name: Run PoC Tests
+        run: cd /tmp/${{ matrix.project }} && forge test ${{ matrix.test_pattern }} -vv
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## ${{ matrix.project }}" >> $GITHUB_STEP_SUMMARY
+          cd /tmp/${{ matrix.project }} && forge test ${{ matrix.test_pattern }} 2>&1 | tail -3 >> $GITHUB_STEP_SUMMARY
